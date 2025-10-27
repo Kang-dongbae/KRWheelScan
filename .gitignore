@@ -1,0 +1,25 @@
+ OS / IDE
+.DS_Store
+.vscode/
+__pycache__/
+*.ipynb_checkpoints/
+
+models/
+
+# ✅ data 폴더 전체 제외
+data/
+!data/**/*.yaml
+!data/**/labels/**/*.txt
+!data/*labels*/**/*.txt
+
+# ✅ models 폴더는 올림 (그래프, 결과, weights 포함)
+# (따로 제외 안 함)
+
+# ❌ 캐시 및 임시 파일 제외
+*labels.cache
+*.cache
+*.tmp
+*.log
+
+# 기타 자동 생성 파일
+**/__pycache__/

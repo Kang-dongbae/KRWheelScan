@@ -1,0 +1,29 @@
+02. 데이터 구성 : 클래스별 이미지 수 
+- wheel > spalling > flat 불균형
+→ wheel 과다, spalling/flat 부족 → oversampling & class weight 적용
+
+03 + 04 : 객체 크기
+- small object 대응 필요
+→ 대부분 small~medium object (평균 6%)
+→ wheel은 대형 객체 → loss imbalance 주의
+
+05 : 객체 위치
+중앙 집중
+→ 중앙 집중형 → Mosaic / Affine / Shift augmentation 필수
+
+09 : 형태분석
+wheel(정사각형), spalling(길쭉), flat(중간형)
+→ spalling은 비율 다양, wheel은 정형 → anchor 다양화 필요
+
+10 : 색상 조명
+H(40~70), S(중간), V(100~130)
+→ 밝기·색조 편향 → ColorJitter, CLAHE, BrightnessContrast 필수
+
+| 구분           | 권장 기법                                        | 이유                          |
+| ------------ | -------------------------------------------- | --------------------------- |
+| **클래스 불균형**  | CopyPaste, Mosaic, WeightedLoss              | flat/spalling 수량 보완         |
+| **작은 결함 객체** | imgsz 960↑, small anchors, high-res training | bbox area ratio 낮음          |
+| **위치 편향**    | ShiftScaleRotate, Mosaic                     | 중앙 집중 분포 완화                 |
+| **형태 다양화**   | Affine, Shear, Rotate                        | aspect ratio 다양성 확보         |
+| **조명 보정**    | ColorJitter, CLAHE                           | 조명·채도 편향 완화                 |
+| **앵커 최적화**   | yolo anchor auto                             | 1:1, 1:2, 2:1 포함 anchor 재탐색 |
