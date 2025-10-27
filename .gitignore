@@ -6,6 +6,7 @@ __pycache__/
 
 models/pred/
 models/stage2_backup/
+models/
 
 # ✅ data 폴더 전체 제외
 data/
