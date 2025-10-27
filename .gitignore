@@ -4,7 +4,8 @@
 __pycache__/
 *.ipynb_checkpoints/
 
-models/
+models/pred/
+models/stage2_backup/
 
 # ✅ data 폴더 전체 제외
 data/
