@@ -8,13 +8,18 @@ from typing import List
 from PIL import Image
 from ultralytics import YOLO
 from sahi import AutoDetectionModel
-from sahi.predict import get_sliced_prediction
 from sahi.slicing import slice_image
 
 import random
 import shutil
 from collections import defaultdict
 
+#from sahi.predict import get_sliced_prediction, save_sliced_prediction_json
+#from sahi.predict import get_sliced_prediction
+#from sahi.utils.file import export_visualizations
+#from sahi.utils.file import export_visualizations
+#from sahi.utils.file import export_visualizations
+import sahi # sahi 패키지 전체를 임포트합니다.
 
 # =======================
 # 경로 / 설정
@@ -99,7 +104,7 @@ SAHI_CFG = dict(
     overlap_w=0.00,   # 가로 겹침 (count_v 모드면 보통 0.0 권장)
 
     # --- 추론/후처리 ---
-    conf_thres=0.18,
+    conf_thres=0.8,
     postprocess="NMS",
     match_metric="IOU",
     match_thres=0.45
@@ -467,6 +472,133 @@ def create_iterative_splits(tile_root: Path, num_iterations: int = 8, train_rati
 
 
 # =======================
+# [2.6단계] 오버샘플링 - 결함데이터만
+# =======================
+
+# 전역 경로 설정을 함수 내부에서 사용한다고 가정합니다.
+from typing import List, Tuple
+def oversample_tiles_for_2_loops(tile_root: Path, train_ratio: float = 0.8) -> Path:
+    """
+    타일 데이터셋(TILE_ROOT)에서 결함 데이터를 2번의 루프를 통해 오버샘플링하고,
+    최종적으로 훈련/검증(Train/Valid) 세트로 분할하여 FINAL_ROOT에 저장합니다.
+    (주의: 라벨이 비어있는 파일은 최종 데이터셋에서 완전히 제외됩니다.)
+
+    Args:
+        tile_root: 타일 이미지와 라벨이 저장된 루트 경로 (예: /data/tiles_out)
+        final_root: 최종 분할 데이터를 저장할 경로 (예: /data/final_splits)
+        train_ratio: 훈련 세트 비율 (기본 0.8)
+
+    Returns:
+        최종 데이터셋이 저장된 경로 (Path)
+    """
+    label_dir = tile_root / "labels"
+    image_dir = tile_root / "images"
+    num_loops = 2
+
+    final_root = tile_root.parent / "final_splits"
+
+    # 1. 이전 결과 삭제 및 새 폴더 생성
+    if final_root.exists():
+        shutil.rmtree(final_root)
+
+    # 2. 모든 라벨 파일 분류
+    all_label_files: List[Path] = list(label_dir.glob("*.txt"))
+
+    class_0_files: List[Path] = []  # 결함0 (복제 대상)
+    class_1_files: List[Path] = []  # 결함1 (나눠서 추출 대상)
+    # empty_files는 제외하므로 리스트를 생성하지 않습니다.
+
+    for label_path in all_label_files:
+        content = label_path.read_text().strip()
+        if not content:
+            # ⭐ 라벨이 비어있는 파일(정상/배경)은 리스트에 추가하지 않고 건너뜁니다.
+            continue 
+
+        classes = {int(line.split()[0]) for line in content.split('\n') if line}
+        has_class_1 = 1 in classes
+        has_class_0 = 0 in classes
+
+        if has_class_1:
+            class_1_files.append(label_path)
+        elif has_class_0:
+            class_0_files.append(label_path)
+        
+        # class 0, 1 외의 클래스는 무시하거나, 필요에 따라 처리 로직을 추가할 수 있습니다.
+
+    # 3. 루프를 돌며 복제 리스트 구성
+    final_replicated_list: List[Tuple[Path, str]] = []  # (original_path, new_name_stem)
+
+    # 결함1 데이터를 절반씩 나누기 위해 섞습니다.
+    random.shuffle(class_1_files)
+    num_class_1 = len(class_1_files)
+    half_class_1 = num_class_1 // 2
+    
+    for i in range(num_loops):
+        print(f"--- 오버샘플링 루프 {i+1}/{num_loops} ---")
+        
+        # 3-1. 그룹0 (결함0) 파일 복제/추출 (모든 루프에서 복제)
+        for label_path in class_0_files:
+            # 복제 파일을 원본과 구별하기 위해 루프 인덱스(i)를 파일명에 추가
+            new_name = f"{label_path.stem}_d0_{i+1}" 
+            final_replicated_list.append((label_path, new_name))
+        
+        # 3-2. 그룹1 (결함1) 파일 절반 추출 (비복원 추출)
+        if i == 0:
+            selected_class_1 = class_1_files[:half_class_1]
+        else: # i == 1
+            selected_class_1 = class_1_files[half_class_1:]
+
+        # 결함1 파일은 루프 인덱스를 붙여 최종 데이터셋에 서로 다른 파일로 존재하게 합니다.
+        for label_path in selected_class_1:
+            new_name = f"{label_path.stem}_d1_{i+1}"
+            final_replicated_list.append((label_path, new_name))
+            
+        # ❌ 3-3. 정상(배경) 파일 추출 로직은 완전히 제거되었습니다.
+
+    # 4. 최종 데이터셋 분할 (8:2)
+    random.shuffle(final_replicated_list)
+    
+    num_total = len(final_replicated_list)
+    num_train = int(num_total * train_ratio)
+    
+    train_replicated = final_replicated_list[:num_train]
+    valid_replicated = final_replicated_list[num_train:]
+
+    print(f"\n--- 최종 Train/Valid 분할 (총 {num_total}개 파일) ---")
+    print(f"Train 셋 (복제): {len(train_replicated)}개 파일 ({train_ratio*100:.0f}%)")
+    print(f"Valid 셋 (복제): {len(valid_replicated)}개 파일 ({(1-train_ratio)*100:.0f}%)")
+
+    # 5. 파일 복사 및 데이터셋 생성
+    train_output_dir = final_root / "train"
+    valid_output_dir = final_root / "valid"
+    (train_output_dir / "images").mkdir(parents=True, exist_ok=True)
+    (train_output_dir / "labels").mkdir(parents=True, exist_ok=True)
+    (valid_output_dir / "images").mkdir(parents=True, exist_ok=True)
+    (valid_output_dir / "labels").mkdir(parents=True, exist_ok=True)
+    
+    def replicate_and_copy(replicated_list, target_dir):
+        target_img_dir = target_dir / "images"
+        target_lbl_dir = target_dir / "labels"
+        
+        for original_path, new_stem in replicated_list:
+            original_stem = original_path.stem
+            original_image_path = image_dir / f"{original_stem}.jpg"
+            
+            if original_image_path.exists() and original_path.exists():
+                new_image_name = f"{new_stem}.jpg"
+                new_label_name = f"{new_stem}.txt"
+                
+                shutil.copy(original_image_path, target_img_dir / new_image_name)
+                shutil.copy(original_path, target_lbl_dir / new_label_name)
+                
+    replicate_and_copy(train_replicated, train_output_dir)
+    replicate_and_copy(valid_replicated, valid_output_dir)
+
+    print(f"\n✅ 데이터셋 생성 완료! 출력 경로: {final_root}")
+
+    return final_root
+
+# =======================
 # [3단계] 타일 데이터 학습
 # =======================
 def stage3_train_defect_on_tiles(data_yaml_tiles: Path, out_dir: Path) -> Path:
@@ -491,27 +623,68 @@ def stage3_train_defect_on_tiles(data_yaml_tiles: Path, out_dir: Path) -> Path:
 # =======================
 # [4단계] SAHI 추론 (타일 규칙 동일)
 # =======================
-def stage4_infer_on_cropped_with_sahi(weights_path: Path, cropped_test_split: Path, out_dir: Path, sahi_cfg: dict):
-    vis_dir = out_dir / "vis"; json_dir = out_dir / "json"
-    ensure_dir(vis_dir); ensure_dir(json_dir)
+def _measure_text(draw, text: str, font=None):
+    # Pillow >= 8.0
+    if hasattr(draw, "textbbox"):
+        l, t, r, b = draw.textbbox((0, 0), text, font=font)
+        return r - l, b - t
+    # Fallbacks
+    if font is not None and hasattr(font, "getbbox"):
+        l, t, r, b = font.getbbox(text)
+        return r - l, b - t
+    if font is not None and hasattr(font, "getsize"):
+        return font.getsize(text)
+    # 아주 보수적인 최후의 추정
+    return (max(1, int(0.6 * 12 * len(text))), 12)
 
-    print("\n=== [4단계] SAHI 추론 시작 ===")
+from PIL import Image, ImageDraw, ImageFont
+from sahi import AutoDetectionModel
+from sahi.predict import get_sliced_prediction
+
+def stage4_infer_yolo_with_sahi(
+    weights_path: Path,
+    cropped_test_split: Path,
+    out_dir: Path,
+    sahi_cfg: dict,
+    keep_empty: bool = True,
+    save_vis: bool = True,
+):
+    """
+    테스트(크롭 휠) 이미지를 SAHI 슬라이싱으로 추론하고,
+    결과를 YOLO 포맷(txt, 'cls cx cy w h conf')으로 저장합니다.
+    - 슬라이싱 규칙: sahi_cfg (훈련과 동일)
+    - postprocess: sahi_cfg (NMS/IOU/threshold 등)
+    """
+    lbl_dir = out_dir / "labels"
+    vis_dir = out_dir / "images_vis"
+    ensure_dir(lbl_dir)
+    if save_vis:
+        ensure_dir(vis_dir)
+
+    print("\n=== [4단계] SAHI 추론 (YOLO 포맷 저장) ===")
     dmodel = AutoDetectionModel.from_pretrained(
         model_type="ultralytics",
         model_path=str(weights_path),
-        confidence_threshold=sahi_cfg["conf_thres"],
-        device=device_str()
+        confidence_threshold=sahi_cfg.get("conf_thres", 0.5),
+        device=device_str(),
     )
 
     imgs = list_images(cropped_test_split / "images")
     if not imgs:
         raise FileNotFoundError(f"크롭 테스트 이미지가 없습니다: {cropped_test_split/'images'}")
 
+    # 폰트는 선택(없는 환경 고려)
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", 14)
+    except Exception:
+        font = None
+
     for ip in imgs:
         im = Image.open(ip).convert("RGB")
         W, H = im.size
         slice_h, slice_w, ovh, ovw = compute_slice_params(W, H, sahi_cfg)
 
+        # SAHI 슬라이스 추론 (+ 병합 후처리)
         res = get_sliced_prediction(
             image=im,
             detection_model=dmodel,
@@ -519,18 +692,90 @@ def stage4_infer_on_cropped_with_sahi(weights_path: Path, cropped_test_split: Pa
             slice_width=slice_w,
             overlap_height_ratio=ovh,
             overlap_width_ratio=ovw,
-            postprocess_type=sahi_cfg["postprocess"],
-            postprocess_match_metric=sahi_cfg["match_metric"],
-            postprocess_match_threshold=sahi_cfg["match_thres"],
-            postprocess_class_agnostic=True
+            postprocess_type=sahi_cfg.get("postprocess", "NMS"),
+            postprocess_match_metric=sahi_cfg.get("match_metric", "IOU"),
+            postprocess_match_threshold=sahi_cfg.get("match_thres", 0.45),
+            postprocess_class_agnostic=True,
         )
 
+        # 🔥 confidence filtering 추가
+       
         stem = Path(ip).stem
-        res.export_visualization(export_dir=str(vis_dir), file_name=f"{stem}_sahi_vis.jpg")
-        res.to_coco_annotations(save_path=str(json_dir / f"{stem}_pred.json"))
+        yolo_lines = []
 
-    print(f"[4단계 완료] 시각화: {vis_dir}")
-    print(f"[4단계 완료] COCO preds: {json_dir}")
+        # SAHI는 중복을 병합한 object_prediction_list를 제공
+        for op in res.object_prediction_list:
+            # bbox: VOC(xmin, ymin, xmax, ymax)
+            x1, y1, x2, y2 = map(float, op.bbox.to_voc_bbox())
+            # YOLO 정규화(cx, cy, w, h)
+            bw = max(1e-6, x2 - x1)
+            bh = max(1e-6, y2 - y1)
+            cx = (x1 + x2) / 2.0
+            cy = (y1 + y2) / 2.0
+
+            cxn = min(max(cx / W, 0.0), 1.0)
+            cyn = min(max(cy / H, 0.0), 1.0)
+            bwn = min(max(bw / W, 1e-6), 1.0)
+            bhn = min(max(bh / H, 1e-6), 1.0)
+
+            # 클래스/점수
+            cls_id = getattr(op.category, "id", 0)
+            try:
+                cls_id = int(cls_id)
+            except Exception:
+                cls_id = 0
+            score = getattr(op.score, "value", None)
+            conf = 0.0 if score is None else float(score)
+
+            yolo_lines.append(f"{cls_id} {cxn:.6f} {cyn:.6f} {bwn:.6f} {bhn:.6f} {conf:.4f}")
+
+        # 신뢰도 높은 순 정렬(선택 사항)
+        if yolo_lines:
+            yolo_lines = sorted(
+                yolo_lines,
+                key=lambda s: float(s.strip().split()[-1]),
+                reverse=True,
+            )
+
+        # YOLO 라벨 저장
+        out_txt = lbl_dir / f"{stem}.txt"
+        if yolo_lines or keep_empty:
+            with open(out_txt, "w") as f:
+                f.write("\n".join(yolo_lines))
+        else:
+            # keep_empty=False 이고 예측 없으면 파일 미생성
+            pass
+
+        # 간단 시각화(선택)
+        if save_vis:
+            try:
+                vis = im.copy()
+                draw = ImageDraw.Draw(vis)
+                for op in res.object_prediction_list:
+                    x1, y1, x2, y2 = map(int, op.bbox.to_voc_bbox())
+                    draw.rectangle([(x1, y1), (x2, y2)], outline=(255, 0, 0), width=2)
+
+                    cls_name = getattr(op.category, "name", None)
+                    cls_id = getattr(op.category, "id", None)
+                    label = str(cls_name if cls_name is not None else cls_id)
+                    score = getattr(op.score, "value", None)
+                    if score is not None:
+                        label = f"{label}:{score:.2f}"
+
+                    if label:
+                        tw, th = _measure_text(draw, label, font=font)
+                        tx, ty = x1, max(0, y1 - th - 2)
+                        # 텍스트 배경 박스
+                        draw.rectangle([(tx, ty), (tx + tw + 2, ty + th + 2)], fill=(255, 0, 0))
+                        draw.text((tx + 1, ty + 1), label, fill=(255, 255, 255), font=font)
+
+                vis.save((vis_dir / f"{stem}.png"))
+            except Exception as e:
+                print(f"⚠️ {ip.name} 시각화 저장 중 오류: {e}")
+
+    print(f"[4단계 완료] YOLO labels: {lbl_dir}")
+    if save_vis:
+        print(f"[4단계 완료] 시각화: {vis_dir}")
 
 
 # =======================
@@ -546,12 +791,24 @@ def main():
     # 2.5단계 : 데이터 오버샘플링
     #final_output_path = create_iterative_splits(tile_root=TILE_ROOT)
     #print(f"\n✨ 최종 Train/Valid 데이터셋 생성 완료 위치: {final_output_path}")
+    
+    # 2.6단계 : 데이터 오버샘플링 - 결함데이터만
+    #final_output_path = oversample_tiles_for_2_loops(tile_root=TILE_ROOT)
+    #print(f"\n✨ 최종 Train/Valid 데이터셋 생성 완료 위치: {final_output_path}")
+
 
     # 3단계: 타일 학습
-    best_defect = stage3_train_defect_on_tiles(DATA_YAML_TILES, STAGE3_DIR)
-
+    #best_defect = stage3_train_defect_on_tiles(DATA_YAML_TILES, STAGE3_DIR)
+    best_defect = MODELS_ROOT / "step3" / "weights" / "best.pt"  
     # 4단계: SAHI 추론 (2단계와 동일 규칙)
-    #stage4_infer_on_cropped_with_sahi(best_defect, CROP_TEST, STAGE4_DIR, SAHI_CFG)
+    stage4_infer_yolo_with_sahi(
+        weights_path=best_defect,
+        cropped_test_split=CROP_TEST,   # /test_tiles (images/labels 구조)
+        out_dir=STAGE4_DIR,             # 결과 저장 루트
+        sahi_cfg=SAHI_CFG,
+        keep_empty=True,                # 예측 없을 때도 빈 txt 생성(권장)
+        save_vis=True                   # 필요 없으면 False
+    )
 
 
 if __name__ == "__main__":
