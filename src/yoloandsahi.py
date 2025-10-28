@@ -21,20 +21,22 @@ VAL_IMAGES   = DATA_ROOT / "valid/images"
 TEST_IMAGES  = DATA_ROOT / "test/images"
 
 # 결과 루트 (WSL UNC 경로)
-MODELS_ROOT = Path(r"\\wsl.localhost\Ubuntu-24.04\home\dongbae\Dev\WheelScan\models")
-STAGE1_DIR = MODELS_ROOT / "stage1"
-STAGE2_DIR = MODELS_ROOT / "stage2"
-STAGE3_DIR = MODELS_ROOT / "stage3"
-STAGE4_DIR = MODELS_ROOT / "stage4"
+MODELS_ROOT = Path("/home/dongbae/Dev/WheelScan/models/")
+STAGE1_DIR = MODELS_ROOT / "step1"
+STAGE2_DIR = MODELS_ROOT / "step2"
+STAGE3_DIR = MODELS_ROOT / "step3"
+STAGE4_DIR = MODELS_ROOT / "step4"
 
 DATA_YAML = Path("/home/dongbae/Dev/WheelScan/data/original_data/data.yaml")
 MODEL_CFG = Path("/home/dongbae/Dev/WheelScan/yolo11s-p2.yaml")
 #PRETRAINED_WEIGHTS = "yolov11s.pt"    # 또는 None
 
 TRAIN_CFG = dict(
+    
+    save_dir = str(MODELS_ROOT),
     imgsz=1536,          
     epochs=120,         
-    batch=8,            
+    batch=6,            
     seed=42,
     patience=30,        
 
@@ -64,7 +66,7 @@ TRAIN_CFG = dict(
     weight_decay=0.0005,
     freeze=0,            
     amp=True,
-    workers=8,
+    workers=4,
     cache=True,
     verbose=False,
     plots=False,
@@ -120,6 +122,7 @@ def stage1_train_p2(data_yaml: Path, out_dir: Path) -> Path:
         "project": str(MODELS_ROOT),
         "name": out_dir.name,
         "device": device_str(),
+
         **TRAIN_CFG,  
     }
     
