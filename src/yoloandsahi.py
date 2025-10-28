@@ -33,8 +33,8 @@ MODEL_CFG = Path("/home/dongbae/Dev/WheelScan/yolo11s-p2.yaml")
 
 TRAIN_CFG = dict(
     
-    save_dir = str(MODELS_ROOT),
-    imgsz=1536,          
+    #save_dir = str(MODELS_ROOT),
+    imgsz=1280,          
     epochs=120,         
     batch=6,            
     seed=42,
@@ -109,7 +109,6 @@ def device_str() -> str:
 # [1단계] 원본 이미지로 학습 (yolo11s-p2)
 # =======================
 def stage1_train_p2(data_yaml: Path, out_dir: Path) -> Path:
-    ensure_dir(out_dir)
     print("\n=== [1단계] 학습 시작 (yolo11s-p2) ===")
     print(f"data: {data_yaml}")
     print(f"model cfg: {MODEL_CFG}")
@@ -137,7 +136,6 @@ def stage1_train_p2(data_yaml: Path, out_dir: Path) -> Path:
 # [2단계] SAHI 설정 저장(간단)
 # =======================
 def stage2_save_sahi_settings(out_dir: Path, sahi_cfg: dict):
-    ensure_dir(out_dir)
     cfg_path = out_dir / "sahi_config.json"
     with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump(sahi_cfg, f, indent=2, ensure_ascii=False)
@@ -149,7 +147,6 @@ def stage2_save_sahi_settings(out_dir: Path, sahi_cfg: dict):
 # [3단계] 기본(비-SAHi) 추론
 # =======================
 def stage3_predict_baseline(weights_path: Path, test_images: Path, out_dir: Path):
-    ensure_dir(out_dir)
     print("\n=== [3단계] 기본(비-SAHi) 추론 시작 ===")
     model = YOLO(str(weights_path))
     model.predict(
@@ -169,7 +166,6 @@ def stage3_predict_baseline(weights_path: Path, test_images: Path, out_dir: Path
 # [4단계] SAHI 추론
 # =======================
 def stage4_predict_sahi(weights_path: Path, test_images: Path, out_dir: Path, sahi_cfg: dict):
-    ensure_dir(out_dir)
     vis_dir = out_dir / "vis"
     json_dir = out_dir / "json"
     ensure_dir(vis_dir); ensure_dir(json_dir)
