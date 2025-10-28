@@ -50,19 +50,19 @@ TRAIN_CFG = dict(
     cls=0.20,
     dfl=1.5,
 
-    mosaic=0.30,
+    mosaic=0.90,
     copy_paste=0.40,
-    mixup=0.0,
+    mixup=0.1,
     erasing=0.10,
     close_mosaic=10,
 
-    degrees=0.0,
+    degrees=5.0,
     shear=0.0,
     perspective=0.0,
     translate=0.05,
-    scale=0.50,
+    scale=0.60,
     hsv_h=0.015, hsv_s=0.50, hsv_v=0.40,
-    fliplr=0.2, flipud=0.0,
+    fliplr=0.5, flipud=0.0,
 
     rect=True,
     optimizer="AdamW",
@@ -798,17 +798,17 @@ def main():
 
 
     # 3단계: 타일 학습
-    #best_defect = stage3_train_defect_on_tiles(DATA_YAML_TILES, STAGE3_DIR)
-    best_defect = MODELS_ROOT / "step3" / "weights" / "best.pt"  
+    best_defect = stage3_train_defect_on_tiles(DATA_YAML_TILES, STAGE3_DIR)
+    #best_defect = MODELS_ROOT / "step3" / "weights" / "best.pt"  
     # 4단계: SAHI 추론 (2단계와 동일 규칙)
-    stage4_infer_yolo_with_sahi(
-        weights_path=best_defect,
-        cropped_test_split=CROP_TEST,   # /test_tiles (images/labels 구조)
-        out_dir=STAGE4_DIR,             # 결과 저장 루트
-        sahi_cfg=SAHI_CFG,
-        keep_empty=True,                # 예측 없을 때도 빈 txt 생성(권장)
-        save_vis=True                   # 필요 없으면 False
-    )
+    #stage4_infer_yolo_with_sahi(
+    #    weights_path=best_defect,
+    #    cropped_test_split=CROP_TEST,   # /test_tiles (images/labels 구조)
+    #    out_dir=STAGE4_DIR,             # 결과 저장 루트
+    #    sahi_cfg=SAHI_CFG,
+    #    keep_empty=True,                # 예측 없을 때도 빈 txt 생성(권장)
+    #    save_vis=True                   # 필요 없으면 False
+    #)
 
 
 if __name__ == "__main__":
