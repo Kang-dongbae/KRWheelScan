@@ -28,7 +28,7 @@ STAGE3_DIR = MODELS_ROOT / "step3"
 STAGE4_DIR = MODELS_ROOT / "step4"
 
 DATA_YAML = Path("/home/dongbae/Dev/WheelScan/data/original_data/data.yaml")
-MODEL_CFG = Path("/home/dongbae/Dev/WheelScan/yolo11s-p2.yaml")
+MODEL_CFG = Path("/home/dongbae/Dev/WheelScan/yolo11m-p2.yaml")
 #PRETRAINED_WEIGHTS = "yolov11s.pt"    # 또는 None
 
 TRAIN_CFG = dict(
@@ -36,7 +36,8 @@ TRAIN_CFG = dict(
     #save_dir = str(MODELS_ROOT),
     imgsz=1280,          
     epochs=120,         
-    batch=6,            
+    batch=2,
+    workers=2,            
     seed=42,
     patience=30,        
 
@@ -66,10 +67,9 @@ TRAIN_CFG = dict(
     weight_decay=0.0005,
     freeze=0,            
     amp=True,
-    workers=4,
     cache=True,
     verbose=False,
-    plots=False,
+    plots=True,
 )
 
 # ====== SAHI 설정 ======
