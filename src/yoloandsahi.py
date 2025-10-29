@@ -601,20 +601,53 @@ def oversample_tiles_for_2_loops(tile_root: Path, train_ratio: float = 0.8) -> P
 # =======================
 # [3단계] 타일 데이터 학습
 # =======================
-def stage3_train_defect_on_tiles(data_yaml_tiles: Path, out_dir: Path) -> Path:
+# =======================
+# [3단계] 타일 데이터 학습 (원본 학습 및 파인 튜닝 모두 지원)
+# =======================
+# =======================
+# [3단계] 타일 데이터 학습 (원본 학습 및 파인 튜닝 모두 지원)
+# =======================
+def stage3_train_defect_on_tiles(
+    data_yaml_tiles: Path, 
+    out_dir: Path,             # out_dir: 최종 저장할 폴더 (예: models/step3 또는 models/step3/fine)
+    weights_path: Path = None, # 초기 가중치 경로
+    train_cfg: dict = None      # 학습 설정 덮어쓰기
+) -> Path: 
     print("\n=== [3단계] 타일 데이터로 결함 모델 학습 ===")
-    print(f"data: {data_yaml_tiles}")
-    model = YOLO(MODEL_CFG)
+    
+    # 1. 모델 초기화
+    if weights_path and weights_path.exists():
+        print(f"⭐ 파인 튜닝 시작: 초기 가중치 경로: {weights_path}")
+        model = YOLO(str(weights_path)) 
+    else:
+        print(f"⭐ 초기 학습 시작: 모델 설정 파일 사용: {MODEL_CFG}")
+        model = YOLO(MODEL_CFG)
+    
+    # 2. 최종 학습 설정 준비
+    if train_cfg:
+        final_train_cfg = TRAIN_CFG.copy()
+        final_train_cfg.update(train_cfg)
+        print(f"   - 설정 덮어쓰기 적용: {list(train_cfg.keys())}")
+    else:
+        final_train_cfg = TRAIN_CFG 
+        print("   - 기본 TRAIN_CFG 설정 사용")
+        
+    # 3. 학습 인자 조합 및 실행
     train_args = {
         "data": str(data_yaml_tiles),
-        "project": str(MODELS_ROOT),
-        "name": out_dir.name,
+        "project": str(out_dir.parent), # 👈 **수정**: out_dir의 부모 폴더를 project로 지정
+        "name": out_dir.name,          # 👈 **수정**: out_dir의 마지막 이름을 name으로 지정
         "device": device_str(),
-        **TRAIN_CFG,
+        **final_train_cfg,
         "plots": True,
         "exist_ok": True,
     }
+    
+    # 4. 학습 시작
     results = model.train(**train_args)
+    
+    # 5. 결과 반환
+    # YOLOv8이 project/name으로 저장하므로, out_dir 경로를 기준으로 최종 경로를 계산
     best = Path(results.save_dir) / "weights" / "best.pt"
     print(f"[3단계 완료] best weights: {best}")
     return best
@@ -778,6 +811,29 @@ def stage4_infer_yolo_with_sahi(
         print(f"[4단계 완료] 시각화: {vis_dir}")
 
 
+def fine_tuning_placeholder():
+    FT_TRAIN_CFG = TRAIN_CFG.copy() 
+    
+    FT_TRAIN_CFG.update(dict(
+        box=2.5,     # mAP50-95 개선
+        cls=0.5,     
+        lr0=0.001,
+        lrf=0.01,
+
+        epochs=150,
+    ))
+
+    PREV_BEST_WEIGHTS = MODELS_ROOT / "step3" / "weights" / "best.pt" 
+    STAGE3_FT_DIR = STAGE3_DIR / "fine" 
+    
+    best_defect_ft = stage3_train_defect_on_tiles(
+        data_yaml_tiles=DATA_YAML_TILES, 
+        out_dir=STAGE3_FT_DIR,           
+        weights_path=PREV_BEST_WEIGHTS,
+        train_cfg=FT_TRAIN_CFG 
+    )
+    return best_defect_ft
+
 # =======================
 # main
 # =======================
@@ -798,18 +854,14 @@ def main():
 
 
     # 3단계: 타일 학습
-    best_defect = stage3_train_defect_on_tiles(DATA_YAML_TILES, STAGE3_DIR)
+    #best_defect = stage3_train_defect_on_tiles(DATA_YAML_TILES, STAGE3_DIR)
     #best_defect = MODELS_ROOT / "step3" / "weights" / "best.pt"  
     # 4단계: SAHI 추론 (2단계와 동일 규칙)
-    #stage4_infer_yolo_with_sahi(
-    #    weights_path=best_defect,
-    #    cropped_test_split=CROP_TEST,   # /test_tiles (images/labels 구조)
-    #    out_dir=STAGE4_DIR,             # 결과 저장 루트
-    #    sahi_cfg=SAHI_CFG,
-    #    keep_empty=True,                # 예측 없을 때도 빈 txt 생성(권장)
-    #    save_vis=True                   # 필요 없으면 False
-    #)
+    #stage4_infer_yolo_with_sahi(weights_path=best_defect, cropped_test_split=CROP_TEST, out_dir=STAGE4_DIR, sahi_cfg=SAHI_CFG, keep_empty=True, save_vis=True)
 
+    # 5단계 파인튜닝
+    best_defect_ft = fine_tuning_placeholder()
+    print(f"\n✨ 파인튜닝 완료된 최종 모델: {best_defect_ft}")
 
 if __name__ == "__main__":
     main()
